@@ -1,0 +1,30 @@
+import assert from "node:assert/strict";
+const origin = "http://localhost:5173";
+const login=await fetch(origin+"/signin-with-chatgpt?return_to=%2F",{redirect:"manual"});
+const cookie=login.headers.get("set-cookie")?.split(";")[0];assert.ok(cookie,"Local development sign-in is available");
+const receipts=[],reviewIds=[];let restaurantId;
+async function call(path,body,authenticated=true,expected=200) {const response=await fetch(origin+path,{...(body!==undefined?{method:"POST",body:body instanceof FormData?body:JSON.stringify(body)}:{}),headers:{Origin:origin,...(authenticated?{Cookie:cookie}:{}),...(body!==undefined&&!(body instanceof FormData)?{"Content-Type":"application/json"}:{})}});const result=await response.json();assert.equal(response.status,expected,JSON.stringify(result));return result;}
+function visit({date,returnVisit="yes",incentivized="no",receiptText="ordinary",fileType="application/pdf"}={}) {const form=new FormData();for(const [key,value] of Object.entries({restaurantId,visitDate:date??new Date(Date.now()-86400000).toISOString().slice(0,10),dish:"TEST meal",spend:"24",returnVisit,food:"4",service:"3",value:"4",note:"Synthetic local test visit, not a real dining experience.",incentivized,relationship:"no"}))form.set(key,value);form.set("receipt",new Blob([fileType==="application/pdf"?`%PDF-1.4\n% SYNTHETIC TEST RECEIPT ONLY: ${receiptText}\n%%EOF`:"<html>not a receipt</html>"],{type:fileType}),fileType==="application/pdf"?"test-receipt.pdf":"not-a-receipt.html");return form;}
+await call("/api/saved",{restaurantId:"sample-casa",save:true},false,401);
+await call("/api/profile",{cuisine:"Italian",budget:25,priority:"value"});
+await call("/api/profile",{cuisine:"Italian",budget:-4,priority:"value"},true,400);
+await call("/api/saved",{restaurantId:"sample-casa",save:true});
+let state=await call("/api/state");assert.ok(state.saved.includes("sample-casa"));assert.equal(state.profile.budget,25);
+const place=await call("/api/restaurants",{name:"TEST — local smoke fixture",cuisine:"Italian",city:"London",neighborhood:"Test area",address:"TEST address for local verification only",price:24},true,201);restaurantId=place.id;
+await call("/api/reviews",visit({fileType:"text/html"}),true,400);
+await call("/api/reviews",visit({date:new Date().toISOString().slice(0,10)}),true,400);
+const first=await call("/api/reviews",visit(),true,201);reviewIds.push(first.id);
+await call("/api/reviews",visit(),true,409);
+state=await call("/api/state");assert.equal(state.restaurants.find(r=>r.id===restaurantId).count,0,"Pending receipt does not alter ratings");assert.ok(state.queue.some(r=>r.id===first.id));
+const privateReceipt=await fetch(origin+"/api/receipt?id="+first.id,{headers:{Cookie:cookie}});assert.equal(privateReceipt.status,200);assert.equal(privateReceipt.headers.get("cache-control"),"private, no-store");assert.ok((await privateReceipt.text()).startsWith("%PDF-"));
+await call("/api/receipt?id="+first.id,undefined,false,401);
+await call("/api/moderation",{id:first.id,decision:"verified",reason:"TEST — synthetic local receipt; exercise state transition only."});
+state=await call("/api/state");let r=state.restaurants.find(r=>r.id===restaurantId);assert.equal(r.count,1);assert.equal(r.yes,1);assert.equal(r.listed,1);
+await call("/api/moderation",{id:first.id,decision:"rejected",reason:"TEST cannot silently overwrite an existing decision."},true,409);
+const second=await call("/api/reviews",visit({date:new Date(Date.now()-2*86400000).toISOString().slice(0,10),incentivized:"yes",returnVisit:"no",receiptText:"incentivized"}),true,201);reviewIds.push(second.id);
+await call("/api/moderation",{id:second.id,decision:"verified",reason:"TEST — disclosed incentive, checked but excluded from scores."});
+state=await call("/api/state");r=state.restaurants.find(r=>r.id===restaurantId);assert.equal(r.count,1,"Incentivized review stays out of rating");assert.equal(r.yes,1);assert.equal(r.excluded,1);
+const third=await call("/api/reviews",visit({date:new Date(Date.now()-3*86400000).toISOString().slice(0,10),returnVisit:"no",receiptText:"rejected"}),true,201);reviewIds.push(third.id);await call("/api/moderation",{id:third.id,decision:"rejected",reason:"TEST — no real purchase; reject synthetic test receipt."});
+state=await call("/api/state");assert.equal(state.restaurants.find(r=>r.id===restaurantId).count,1,"Rejected review stays out of rating");assert.equal(state.diary.filter(r=>reviewIds.includes(r.id)).length,3);
+await call("/api/saved",{restaurantId:"sample-casa",save:false});await call("/api/profile",{cuisine:"Any",budget:40,priority:"food"});
+console.log(JSON.stringify({passed:["authentication","durable bookmarks","durable taste preferences","restaurant creation","upload validation","delayed feedback","receipt deduplication","pending score exclusion","private receipt retrieval","moderation ledger","incentive score exclusion","rejection score exclusion"],localFixture:{restaurantId,reviewIds}}));

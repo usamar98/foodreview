@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1789653830296,
+      "tag": "0000_married_ken_ellis",
+      "breakpoints": true
+    }
+  ]
+}
