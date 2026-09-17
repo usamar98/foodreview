@@ -24,7 +24,7 @@ The portable starter has loopback-only mock ChatGPT sign-in. Hosted identity com
 
 This repository has two build targets. `npm run build` preserves the original Vinext/Cloudflare Sites deployment. Vercel uses the standard Next.js target, `npm run build:vercel`, declared in `vercel.json`; it generates `.next/routes-manifest.json`. Do not configure Vercel to use the original build command or `dist` output.
 
-Import `usamar98/foodreview`, select branch `main`, keep the root directory at the repository root, and use Node.js 22.x. The repository sets the framework to **Next.js**, build command to **npm run build:vercel**, and output directory to **.next**. Redeploy after pulling this configuration.
+Import `usamar98/foodreview`, select branch `main`, keep the root directory at the repository root, and use Node.js 22.x. The repository sets the framework to **Next.js**, build command to **npm run build:vercel**, and output directory to the framework default (**.next**), clearing custom output overrides. Redeploy after pulling this configuration.
 
 The UI builds without secrets, but live persistence and sign-in require the server-only variables in `.env.example`. Configure them for each Vercel environment you use, then redeploy:
 
