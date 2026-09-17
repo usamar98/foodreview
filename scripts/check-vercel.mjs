@@ -34,48 +34,76 @@ process.env.SAVOUR_MODERATOR_IDS = "github:456, github:123";
 assert.equal(isModerator(user), true);
 assert.equal(isModerator({ ...user, userId: "github:12" }), false);
 assert.equal(isModerator(null), false);
-const { env } = await loadTs("../lib/vercel/bindings.ts");
-for (const name of ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_D1_DATABASE_ID", "CLOUDFLARE_R2_BUCKET_NAME"]) process.env[name] = "test-placeholder";
+const { repository } = await loadTs("../lib/supabase/repository.ts");
+const { isDuplicateError } = await loadTs("../lib/repository-types.ts");
+process.env.SUPABASE_URL = "https://test-project.supabase.co";
+process.env.SUPABASE_SECRET_KEY = "sb_secret_synthetic_test_key";
+process.env.SUPABASE_RECEIPTS_BUCKET = "receipts";
 const realFetch = globalThis.fetch;
 let calls = [];
 globalThis.fetch = async (url, options) => {
+  url = new URL(url);
   calls.push({ url, options });
   assert.equal(options.cache, "no-store");
-  assert.equal(options.headers.get("Authorization"), "Bearer test-placeholder");
-  if (url.endsWith("/query")) {
-    const body = JSON.parse(options.body);
-    return Response.json({ success: true, result: (body.batch ?? [body]).map(() => ({ success: true, results: [{ id: "visit-1" }], meta: { changes: 1 } })) });
-  }
-  if (options.method === "PUT") return Response.json({ success: true });
-  if (options.method === "DELETE") return Response.json({ success: true });
+  assert.equal(options.redirect, "error");
+  assert.equal(options.headers.get("apikey"), "sb_secret_synthetic_test_key");
+  assert.equal(options.headers.has("Authorization"), false);
+  if (url.pathname.endsWith("savour_moderate_review")) return Response.json(true);
+  if (url.pathname.startsWith("/rest/v1/")) return options.method && options.method !== "GET" && !url.pathname.includes("/rpc/") ? new Response(null,{status:201}) : Response.json([{id:"visit-1",receipt_key:"receipts/visit-1"}]);
+  if (options.method === "POST" || options.method === "DELETE") return Response.json({ success: true });
   return new Response("%PDF-test", { headers: { "Content-Type": "application/pdf" } });
 };
 try {
-  assert.equal((await env.DB.prepare("SELECT id WHERE user_id=?").bind(user.userId).first()).id, "visit-1");
-  assert.deepEqual(JSON.parse(calls[0].options.body), { sql: "SELECT id WHERE user_id=?", params: [user.userId] });
-  const batch = await env.DB.batch([env.DB.prepare("UPDATE reviews SET status=?").bind("verified"), env.DB.prepare("UPDATE restaurants SET listed=1")]);
-  assert.equal(batch.length, 2);
-  assert.equal(JSON.parse(calls[1].options.body).batch.length, 2); // One atomic D1 batch request.
-  await env.BUCKET.put("receipts/a b", new ArrayBuffer(3), { httpMetadata: { contentType: "application/pdf" } });
-  assert.ok(calls.at(-1).url.endsWith("/objects/receipts/a%20b"));
+  const anonymous = await repository.state(null,false);
+  assert.equal(anonymous.profile,null);
+  assert.deepEqual(anonymous.diary,[]);
+  assert.deepEqual(anonymous.queue,[]);
+  assert.equal(calls.length,1); // An anonymous request never fetches private rows.
+  calls=[];
+  await repository.state(user.userId,false);
+  assert.equal(calls.length,4);
+  for (const call of calls.filter(c=>!c.url.pathname.includes("/rpc/"))) assert.equal(call.url.searchParams.get("user_id"),`eq.${user.userId}`);
+  await repository.receiptKey("visit-1",user.userId,false);
+  assert.equal(calls.at(-1).url.searchParams.get("user_id"),`eq.${user.userId}`);
+  await repository.receiptKey("visit-1",user.userId,true);
+  assert.equal(calls.at(-1).url.searchParams.has("user_id"),false);
+  await repository.save(user.userId,"sample-casa",true);
+  assert.ok(calls.at(-1).options.headers.get("Prefer").includes("ignore-duplicates"));
+  await repository.save(user.userId,"sample-casa",false);
+  assert.equal(calls.at(-1).url.searchParams.get("user_id"),`eq.${user.userId}`);
+  const hostileId = 'place,or(user_id.eq.other)';
+  await repository.duplicateReview("hash",user.userId,hostileId,"2026-01-01");
+  assert.ok(calls.at(-1).url.searchParams.get("or").includes(`restaurant_id.eq.${JSON.stringify(hostileId)}`));
+  await repository.publicReviews("place-1");
+  assert.equal(calls.at(-1).url.searchParams.get("status"),"eq.verified");
+  for (const field of ["receipt_key","receipt_hash","user_id","spend","moderator"]) assert.ok(!calls.at(-1).url.searchParams.get("select").split(",").includes(field));
+  assert.equal(await repository.moderate("visit-1","verified","Receipt checked by reviewer",user.userId),true);
+  assert.equal(calls.at(-1).url.pathname,"/rest/v1/rpc/savour_moderate_review");
+  await repository.putReceipt("receipts/a b", new ArrayBuffer(3), "application/pdf");
+  assert.ok(calls.at(-1).url.pathname.endsWith("/object/receipts/receipts/a%20b"));
   assert.equal(calls.at(-1).options.headers.get("Content-Type"), "application/pdf");
-  const receipt = await env.BUCKET.get("receipts/a b");
-  assert.equal(receipt.httpMetadata.contentType, "application/pdf");
+  assert.equal(calls.at(-1).options.headers.get("x-upsert"),"false");
+  const receipt = await repository.getReceipt("receipts/a b");
+  assert.equal(receipt.contentType, "application/pdf");
   assert.equal(await new Response(receipt.body).text(), "%PDF-test");
-  await env.BUCKET.delete("receipts/a b");
-  globalThis.fetch = async () => new Response(null, { status: 404 });
-  assert.equal(await env.BUCKET.get("missing"), null);
-  globalThis.fetch = async () => Response.json({ success: false, errors: [{ message: "UNIQUE constraint failed" }] });
-  await assert.rejects(env.DB.prepare("INSERT").run(), /UNIQUE/);
-  await assert.rejects(env.BUCKET.put("receipt", new ArrayBuffer(0)), /upload failed/);
+  await repository.deleteReceipt("receipts/a b");
+  assert.deepEqual(JSON.parse(calls.at(-1).options.body),{prefixes:["receipts/a b"]});
+  globalThis.fetch = async () => Response.json({code:"NoSuchKey"},{status:400});
+  assert.equal(await repository.getReceipt("missing"), null);
+  globalThis.fetch = async () => Response.json({code:"23505"},{status:409});
+  await assert.rejects(repository.addReview({}),error=>isDuplicateError(error));
+  await assert.rejects(repository.putReceipt("receipt",new ArrayBuffer(0),"application/pdf"),/Supabase request failed/);
+  delete process.env.SUPABASE_SECRET_KEY;
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  await assert.rejects(repository.state(null,false),/Configure SUPABASE/);
 } finally { globalThis.fetch = realFetch; }
-console.log("Session integrity, expiry, moderator permissions, and D1/R2 transport checks passed.");
+console.log("Session integrity, moderator permissions, Supabase transport, ownership, and private storage checks passed.");
 
 if (process.argv.includes("--integration")) {
   // This starts only a loopback server with synthetic auth settings and no backend token.
   const origin = "http://127.0.0.1:3007";
   const child = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "--hostname", "127.0.0.1", "--port", "3007"], {
-    stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AUTH_URL: origin, AUTH_SECRET: secret, AUTH_GITHUB_ID: "synthetic-test-client", AUTH_GITHUB_SECRET: "synthetic-test-secret", CLOUDFLARE_API_TOKEN: "", SAVOUR_MODERATOR_IDS: "" },
+    stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AUTH_URL: origin, AUTH_SECRET: secret, AUTH_GITHUB_ID: "synthetic-test-client", AUTH_GITHUB_SECRET: "synthetic-test-secret", SUPABASE_SECRET_KEY: "", SUPABASE_SERVICE_ROLE_KEY: "", SAVOUR_MODERATOR_IDS: "" },
   });
   let output = "";
   child.stdout.on("data", chunk => { output += chunk; });

@@ -5,9 +5,9 @@ A working private pilot for restaurant discovery with transparent review evidenc
 ## Included
 
 - Search by restaurant, cuisine, dish, city, or neighborhood; filter by cuisine and price.
-- Persisted bookmarks, taste preferences, and dining diary, attributed to the signed-in ChatGPT user.
+- Persisted bookmarks, taste preferences, and dining diary, attributed to the signed-in user (GitHub on Vercel, ChatGPT on Sites).
 - Real restaurant submissions start without ratings and are unlisted until a visit is checked.
-- Private receipt uploads to R2. Reviews start pending and are manually checked in the review desk.
+- Private receipt uploads to Supabase Storage on Vercel. Reviews start pending and are manually checked in the review desk.
 - Exact receipt deduplication, one submission per diner/restaurant/day, and next-calendar-day feedback.
 - Ratings use checked, non-incentivized, unconnected visits from the previous 180 days. Sample size and a 95% Wilson interval remain visible.
 - Immutable review decisions through the app, with reviewer, reason, and timestamp recorded.
@@ -30,13 +30,15 @@ The UI builds without secrets, but live persistence and sign-in require the serv
 
 Vercel receipt uploads are limited to 4 MB to leave room for form fields within its function payload limit. Sites retains its 5 MB receipt limit. Run `npm run check:vercel` for transport and session checks, or `node scripts/check-vercel.mjs --integration` after a Vercel build to exercise a temporary production server on loopback port 3007.
 
+Run `npm run check:supabase` to exercise the actual schema in an isolated in-memory PostgreSQL engine. It checks table permissions, visibility, duplicate constraints, repeat moderation, score exclusions, saves and preferences without touching a live project. PGlite is a development dependency used only for this check.
+
 1. Create a GitHub OAuth App. Set its homepage to your deployment origin and its authorization callback to `https://YOUR_DOMAIN/api/auth/github/callback`. Put its client ID and secret in `AUTH_GITHUB_ID` and `AUTH_GITHUB_SECRET`; set `AUTH_URL` to that origin. Generate `AUTH_SECRET` with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`. Use separate OAuth apps for local and production domains if necessary. Local Next development uses `npm run dev:vercel`.
-2. Create a Cloudflare D1 database and a private R2 bucket in an account you control. Set `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_D1_DATABASE_ID`, and `CLOUDFLARE_R2_BUCKET_NAME`. Give `CLOUDFLARE_API_TOKEN` D1 write and R2 object read/write permissions for that account. The server uses the Cloudflare REST APIs. Apply the existing schema once with `npx wrangler d1 execute YOUR_DATABASE_NAME --remote --file=drizzle/0000_married_ken_ellis.sql`; apply future migrations in order. The existing Sites-managed database and receipts do not move automatically.
+2. Create a separate Supabase project named `foodreview`. In its **SQL Editor**, run [supabase/schema.sql](supabase/schema.sql) once. This creates the tables, server-only functions, indexes, and private `receipts` bucket (4 MB; JPG, PNG, PDF). Tables have RLS enabled and deny browser access; authorized Next.js routes use the server secret key. From **Connect**, copy the project URL to `SUPABASE_URL`. From **Settings → API Keys**, copy a secret key (`sb_secret_...`) to `SUPABASE_SECRET_KEY`. Set `SUPABASE_RECEIPTS_BUCKET=receipts`. Configure these in Vercel and redeploy. A legacy service-role JWT is also supported through `SUPABASE_SERVICE_ROLE_KEY`; a publishable/anon key is insufficient. No Cloudflare account or R2 billing setup is required for Vercel. The original Sites target retains its managed bindings. Existing Cloudflare rows and receipt files do not move automatically; use a separate reviewed data export/import if that backend has real contributions.
 3. Set `SAVOUR_MODERATOR_IDS` to your numeric GitHub user ID prefixed with `github:` (find the `id` at `https://api.github.com/users/YOUR_USERNAME`). Separate multiple IDs with commas. Ordinary users can contribute visits and retrieve their own receipts; only allowlisted moderators can read the review queue, inspect other diners' receipts, and make decisions. An empty allowlist grants nobody moderation access.
 
 Do not prefix secrets with `NEXT_PUBLIC_`. GitHub OAuth uses state validation, PKCE, an expiring signed HttpOnly session cookie, and verified GitHub email addresses. Incoming ChatGPT identity headers are ignored on Vercel. No external credentials are committed. Without backend configuration the UI shows the disclosed sample restaurants and a store connection error; it does not pretend to save data.
 
-Reference: [Vercel build configuration](https://vercel.com/docs/project-configuration/vercel-json), [GitHub OAuth](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps), [D1 query API](https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/query/), [R2 object API](https://developers.cloudflare.com/api/resources/r2/subresources/buckets/subresources/objects/).
+Reference: [Vercel build configuration](https://vercel.com/docs/project-configuration/vercel-json), [GitHub OAuth](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps), [Supabase server API keys](https://supabase.com/docs/guides/getting-started/api-keys), [private Supabase buckets](https://supabase.com/docs/guides/storage/buckets/fundamentals).
 
 ## Sites access boundary
 
