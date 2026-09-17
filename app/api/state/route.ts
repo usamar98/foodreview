@@ -1,6 +1,7 @@
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { db } from "@/lib/store";
 import { defaultProfile } from "@/lib/catalog";
+import { isModerator } from "@/lib/permissions";
 import { failure } from "@/lib/api";
 export const dynamic="force-dynamic";
 export async function GET() {try {const user=await getChatGPTUser(), store=db();const [places,bookmarks,profile,diary,queue]=await Promise.all([
@@ -8,7 +9,6 @@ store.prepare(`SELECT r.*, COALESCE(a.yes,0) AS yes, COALESCE(a.count,0) AS coun
 user?store.prepare("SELECT restaurant_id FROM saved WHERE user_id=?").bind(user.userId).all():Promise.resolve({results:[]}),
 user?store.prepare("SELECT cuisine,budget,priority FROM profiles WHERE user_id=?").bind(user.userId).first():Promise.resolve(null),
 user?store.prepare("SELECT id,restaurant_id,visit_date,dish,spend,return_visit,food,service,value,note,incentivized,relationship,status,decision_note,created_at FROM reviews WHERE user_id=? ORDER BY created_at DESC LIMIT 200").bind(user.userId).all():Promise.resolve({results:[]}),
-// This initial owner-private pilot uses the Sites access policy for reviewer authorization.
-// Before inviting other diners, replace this with a moderator allowlist.
-user?store.prepare("SELECT id,restaurant_id,visit_date,dish,spend,return_visit,food,service,value,note,incentivized,relationship,status,decision_note,created_at FROM reviews WHERE status='pending' ORDER BY created_at LIMIT 100").all():Promise.resolve({results:[]}),
-]);return Response.json({restaurants:places.results.map(r=>({...r,demo:false,image:"",description:"A diner-submitted restaurant. Explore checked visits before deciding.",dish:""})),saved:bookmarks.results.map((r:Record<string,unknown>)=>r.restaurant_id),profile:profile??defaultProfile,diary:diary.results,queue:queue.results,signedIn:!!user},{headers:{"Cache-Control":"no-store"}});}catch(e){return failure(e);}}
+// On Vercel, only the explicit moderator allowlist can read the queue.
+isModerator(user)?store.prepare("SELECT id,restaurant_id,visit_date,dish,spend,return_visit,food,service,value,note,incentivized,relationship,status,decision_note,created_at FROM reviews WHERE status='pending' ORDER BY created_at LIMIT 100").all():Promise.resolve({results:[]}),
+]);return Response.json({restaurants:places.results.map(r=>({...r,demo:false,image:"",description:"A diner-submitted restaurant. Explore checked visits before deciding.",dish:""})),saved:bookmarks.results.map((r:Record<string,unknown>)=>r.restaurant_id),profile:profile??defaultProfile,diary:diary.results,queue:queue.results,signedIn:!!user,moderator:isModerator(user)},{headers:{"Cache-Control":"no-store"}});}catch(e){return failure(e);}}

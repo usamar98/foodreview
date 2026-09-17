@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/lib/bindings": ["./lib/vercel/bindings.ts"],
+      "@/app/chatgpt-auth": ["./lib/vercel/auth.ts"],
+      "@/lib/host-auth": ["./lib/vercel/oauth.ts"],
+      "@/*": ["./*"]
+    }
+  }
+}
