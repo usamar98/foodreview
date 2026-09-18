@@ -5,6 +5,7 @@ A working private pilot for restaurant discovery with transparent review evidenc
 ## Included
 
 - Search by restaurant, cuisine, dish, city, or neighborhood; filter by cuisine and price.
+- US discovery across New Jersey, New York, and California, with a sourced OpenStreetMap directory, 46 cuisine/dietary categories, state/city filters, category counts, checked-visit filtering, and 24-place pages.
 - Persisted bookmarks, taste preferences, and dining diary, attributed to the signed-in user (GitHub on Vercel, ChatGPT on Sites).
 - Real restaurant submissions start without ratings and are unlisted until a visit is checked.
 - Private receipt uploads to Supabase Storage on Vercel. Reviews start pending and are manually checked in the review desk.
@@ -12,9 +13,16 @@ A working private pilot for restaurant discovery with transparent review evidenc
 - Ratings use checked, non-incentivized, unconnected visits from the previous 180 days. Sample size and a 95% Wilson interval remain visible.
 - Immutable review decisions through the app, with reviewer, reason, and timestamp recorded.
 - Three explicitly fictional sample restaurants, with licensed illustrative Unsplash photographs.
+- Fictional samples are an optional separate view. Real directory listings have no invented reviews, prices, or venue photographs. Their checked reviews feed the same receipt-backed evidence calculations.
 - WebMCP search and save actions share the visible app state and persisted bookmarks.
 
 ## Run
+
+The real US directory is bundled at `public/data/restaurants-us.json` and loads independently of the private review store. It needs no paid Places API key. Listing details come from source city/street/cuisine tags and may change. New Jersey and New York use state extracts; California uses venues explicitly tagged with a California state address. The JSON records source timestamps, selection queries and coverage, and is distributed under ODbL with visible OpenStreetMap attribution and a public download. This is a diverse bounded snapshot, not exhaustive state coverage.
+
+Run `npm run check:directory` to check coverage, source IDs, geography, categories, duplicate merging and review evidence. `npm run data:import` refreshes the dataset; cached raw extracts live only in ignored `work/osm/`. Remove the specific cached source files before intentionally fetching a new snapshot. To use a different public Overpass instance, run `node scripts/import-us-restaurants.mjs --endpoint https://maps.mail.ru/osm/tools/overpass/api/interpreter`. Importing is a maintainer action, not a runtime API dependency.
+
+Imported OSM IDs can be saved and reviewed directly. They do not need seed rows or another Supabase schema migration. Checked review aggregates are merged with source metadata; pending, rejected, incentivized, connected and older reviews remain excluded from scores. Imported meal prices stay unknown until reliable price information is supplied. The optional budget filter excludes unknown prices when a maximum is set.
 
 Node 22.13+ is required. Use npm run install:ci, npm run db:generate, and npm run build. Apply each pending Drizzle migration locally with Wrangler using dist/server/wrangler.json and .wrangler/state, then run npm run dev. The development server prints its URL.
 
@@ -36,7 +44,7 @@ Run `npm run check:supabase` to exercise the actual schema in an isolated in-mem
 2. Create a separate Supabase project named `foodreview`. In its **SQL Editor**, run [supabase/schema.sql](supabase/schema.sql) once. This creates the tables, server-only functions, indexes, and private `receipts` bucket (4 MB; JPG, PNG, PDF). Tables have RLS enabled and deny browser access; authorized Next.js routes use the server secret key. From **Connect**, copy the project URL to `SUPABASE_URL`. From **Settings → API Keys**, copy a secret key (`sb_secret_...`) to `SUPABASE_SECRET_KEY`. Set `SUPABASE_RECEIPTS_BUCKET=receipts`. Configure these in Vercel and redeploy. A legacy service-role JWT is also supported through `SUPABASE_SERVICE_ROLE_KEY`; a publishable/anon key is insufficient. No Cloudflare account or R2 billing setup is required for Vercel. The original Sites target retains its managed bindings. Existing Cloudflare rows and receipt files do not move automatically; use a separate reviewed data export/import if that backend has real contributions.
 3. Set `SAVOUR_MODERATOR_IDS` to your numeric GitHub user ID prefixed with `github:` (find the `id` at `https://api.github.com/users/YOUR_USERNAME`). Separate multiple IDs with commas. Ordinary users can contribute visits and retrieve their own receipts; only allowlisted moderators can read the review queue, inspect other diners' receipts, and make decisions. An empty allowlist grants nobody moderation access.
 
-Do not prefix secrets with `NEXT_PUBLIC_`. GitHub OAuth uses state validation, PKCE, an expiring signed HttpOnly session cookie, and verified GitHub email addresses. Incoming ChatGPT identity headers are ignored on Vercel. No external credentials are committed. Without backend configuration the UI shows the disclosed sample restaurants and a store connection error; it does not pretend to save data.
+Do not prefix secrets with `NEXT_PUBLIC_`. GitHub OAuth uses state validation, PKCE, an expiring signed HttpOnly session cookie, and verified GitHub email addresses. Incoming ChatGPT identity headers are ignored on Vercel. No external credentials are committed. Without backend configuration the real public directory still loads; private saves and submissions show a store connection error until configured.
 
 Reference: [Vercel build configuration](https://vercel.com/docs/project-configuration/vercel-json), [GitHub OAuth](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps), [Supabase server API keys](https://supabase.com/docs/guides/getting-started/api-keys), [private Supabase buckets](https://supabase.com/docs/guides/storage/buckets/fundamentals).
 
@@ -50,4 +58,4 @@ TypeScript and the production build passed. scripts/smoke-api.mjs exercises loca
 
 ## Before public launch
 
-Add distinct reviewer permissions, independent reviewer operations, incentives abuse investigation, rate limiting, disputes/appeals, receipt retention and deletion controls, contributor privacy settings, and real venue coverage. Payment collection requires a separately configured provider. The product explicitly labels its current private pilot limits.
+Add independent reviewer operations, incentives abuse investigation, rate limiting, disputes/appeals, receipt retention and deletion controls, contributor privacy settings, and ongoing venue-data quality checks. Payment collection requires a separately configured provider. The product explicitly labels its current private pilot limits.

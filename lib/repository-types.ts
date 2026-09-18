@@ -3,6 +3,7 @@ export type Profile = { cuisine: string; budget: number; priority: string };
 export type RestaurantInput = { id: string; creator: string; name: string; cuisine: string; city: string; neighborhood: string; address: string; price: number; created_at: string };
 export type ReviewInput = { id: string; user_id: string; restaurant_id: string; visit_date: string; dish: string; spend: number; return_visit: number; food: number; service: number; value: number; note: string; incentivized: number; relationship: number; receipt_key: string; receipt_hash: string; status: "pending"; created_at: string };
 export interface ReviewRepository {
+  catalogEvidence(): Promise<Row[]>;
   state(userId: string | null, moderator: boolean): Promise<{ restaurants: Row[]; saved: string[]; profile: Row | null; diary: Row[]; queue: Row[] }>;
   restaurantVisible(id: string, userId: string): Promise<boolean>;
   findRestaurant(name: string, address: string, userId: string): Promise<string | null>;

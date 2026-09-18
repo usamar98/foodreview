@@ -22,7 +22,7 @@ assert.equal(cookieNames().secure, true);
 
 // Exercise transport contracts without contacting a real account or using keys.
 async function loadTs(path) {
-  const source = await readFile(new URL(path, import.meta.url), "utf8");
+  const source = (await readFile(new URL(path, import.meta.url), "utf8")).replaceAll('"@/lib/evidence.mjs"',JSON.stringify(new URL("../lib/evidence.mjs",import.meta.url).href));
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(js).toString("base64")}`);
 }
@@ -93,6 +93,17 @@ try {
   globalThis.fetch = async () => Response.json({code:"23505"},{status:409});
   await assert.rejects(repository.addReview({}),error=>isDuplicateError(error));
   await assert.rejects(repository.putReceipt("receipt",new ArrayBuffer(0),"application/pdf"),/Supabase request failed/);
+  // Aggregate all result pages even if the server applies a smaller page size.
+  globalThis.fetch = async url => {
+    const u=new URL(url);
+    assert.equal(u.searchParams.get("status"),"eq.verified");
+    assert.ok(!u.searchParams.get("select").includes("receipt_key"));
+    const offset=Number(u.searchParams.get("offset"));
+    return Response.json(offset>=2?[]:[{restaurant_id:"osm-node-1",visit_date:new Date(Date.now()-86400000).toISOString().slice(0,10),status:"verified",return_visit:offset===0?1:0,food:4,service:3,value:5,incentivized:0,relationship:0}]);
+  };
+  const evidence=await repository.catalogEvidence();
+  assert.equal(evidence[0].count,2);
+  assert.equal(evidence[0].yes,1);
   delete process.env.SUPABASE_SECRET_KEY;
   delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   await assert.rejects(repository.state(null,false),/Configure SUPABASE/);
@@ -119,6 +130,18 @@ if (process.argv.includes("--integration")) {
     const root = await fetch(origin, { headers: { "oai-authenticated-user-id": "spoofed", "oai-authenticated-user-email": "attacker@example.com" } });
     assert.equal(root.status, 200);
     assert.ok((await root.text()).includes("/api/auth/github"));
+    const directoryResponse=await fetch(origin+"/data/restaurants-us.json");
+    assert.equal(directoryResponse.status,200,"Public directory works without backend credentials");
+    const directory=await directoryResponse.json();
+    assert.equal(directory.venues.length,9000);
+    assert.deepEqual(new Set(directory.venues.map(v=>v.state)),new Set(["NJ","NY","CA"]));
+    const invalidReceipt=new FormData();
+    const fields={restaurantId:directory.venues[0].id,visitDate:new Date(Date.now()-86400000).toISOString().slice(0,10),dish:"Synthetic test meal",spend:"25",returnVisit:"yes",food:"4",service:"4",value:"4",note:"Synthetic local validation fixture.",incentivized:"no",relationship:"no"};
+    for(const [key,value] of Object.entries(fields))invalidReceipt.set(key,value);
+    invalidReceipt.set("receipt",new Blob(["invalid receipt signature"],{type:"application/pdf"}),"invalid.pdf");
+    const reviewResponse=await fetch(origin+"/api/reviews",{method:"POST",headers:{Origin:origin,Cookie:`savour-session=${token}`},body:invalidReceipt});
+    assert.equal(reviewResponse.status,400,"Known directory IDs reach file validation without database seeding");
+    assert.match((await reviewResponse.json()).error,/valid JPG, PNG, or PDF/);
     const mutation = { method: "POST", headers: { Origin: origin, "Content-Type": "application/json", "oai-authenticated-user-id": "spoofed", "oai-authenticated-user-email": "attacker@example.com" }, body: "{}" };
     assert.equal((await fetch(origin + "/api/saved", mutation)).status, 401);
     assert.equal((await fetch(origin + "/api/moderation", { ...mutation, headers: { ...mutation.headers, Cookie: `savour-session=${token}` } })).status, 403);
@@ -133,6 +156,6 @@ if (process.argv.includes("--integration")) {
     assert.ok(login.headers.get("set-cookie").includes("HttpOnly"));
     assert.equal((await fetch(origin + "/api/auth/github/callback?code=fake&state=wrong")).status, 400);
     assert.equal((await fetch(origin + "/api/auth/signout", { method: "POST", headers: { Origin: "https://attacker.example" } })).status, 403);
-    console.log("Next.js production HTTP checks passed: landing page, GitHub PKCE/state, identity spoofing, CSRF, and access control.");
+    console.log("Next.js production HTTP checks passed: public 9,000-place directory without backend credentials, directory review validation, landing page, GitHub PKCE/state, identity spoofing, CSRF, and access control.");
   } finally { child.kill(); }
 }

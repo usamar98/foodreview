@@ -1,5 +1,6 @@
 // Server routes only: secret keys bypass RLS, so every private query is scoped here.
 import type { ReviewRepository, Row } from "@/lib/repository-types";
+import {directoryEvidence} from "@/lib/evidence.mjs";
 
 const diaryFields = "id,restaurant_id,visit_date,dish,spend,return_visit,food,service,value,note,incentivized,relationship,status,decision_note,created_at";
 const publicFields = "id,restaurant_id,visit_date,dish,return_visit,food,service,value,note,incentivized,relationship,status,created_at";
@@ -46,6 +47,17 @@ function objectPath(key?: string) {
 }
 
 export const repository: ReviewRepository = {
+  async catalogEvidence() {
+    const reviews: Row[] = [];
+    // Offset advances by the returned count, so server page-size limits cannot
+    // silently truncate evidence. Only fields already public on checked notes.
+    for(let offset=0;;) {
+      const page=await rows("reviews",{select:"restaurant_id,visit_date,return_visit,food,service,value,incentivized,relationship,status",status:"eq.verified",restaurant_id:"like.osm-*",order:"id.asc",limit:"500",offset:String(offset)});
+      if(!page.length)break;
+      reviews.push(...page);offset+=page.length;
+    }
+    return directoryEvidence(reviews);
+  },
   async state(userId, moderator) {
     const [restaurants,saved,profiles,diary,queue] = await Promise.all([
       rpc<Row[]>("savour_restaurants",{p_user_id:userId}),

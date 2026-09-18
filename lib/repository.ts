@@ -5,6 +5,9 @@ import type { ReviewRepository, Row } from "@/lib/repository-types";
 const diaryFields = "id,restaurant_id,visit_date,dish,spend,return_visit,food,service,value,note,incentivized,relationship,status,decision_note,created_at";
 
 export const repository: ReviewRepository = {
+  async catalogEvidence() {
+    return (await db().prepare(`SELECT restaurant_id, SUM(CASE WHEN incentivized=0 AND relationship=0 AND visit_date>=date('now','-180 days') THEN return_visit ELSE 0 END) AS yes, SUM(CASE WHEN incentivized=0 AND relationship=0 AND visit_date>=date('now','-180 days') THEN 1 ELSE 0 END) AS count, COALESCE(AVG(CASE WHEN incentivized=0 AND relationship=0 AND visit_date>=date('now','-180 days') THEN food END),0) AS food, COALESCE(AVG(CASE WHEN incentivized=0 AND relationship=0 AND visit_date>=date('now','-180 days') THEN service END),0) AS service, COALESCE(AVG(CASE WHEN incentivized=0 AND relationship=0 AND visit_date>=date('now','-180 days') THEN value END),0) AS value, MAX(CASE WHEN incentivized=0 AND relationship=0 AND visit_date>=date('now','-180 days') THEN visit_date END) AS lastVisit, SUM(CASE WHEN incentivized=1 OR relationship=1 THEN 1 ELSE 0 END) AS excluded FROM reviews WHERE status='verified' AND restaurant_id LIKE 'osm-%' GROUP BY restaurant_id`).all<Row>()).results;
+  },
   async state(userId, moderator) {
     const store = db();
     const [places, saved, profile, diary, queue] = await Promise.all([

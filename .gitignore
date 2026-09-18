@@ -46,3 +46,6 @@ next-env.d.ts
 /outputs/
 /work/
 *.tsbuildinfo
+
+# Cached source responses used by the reproducible restaurant importer.
+work/osm/
